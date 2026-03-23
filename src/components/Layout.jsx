@@ -1,95 +1,103 @@
-import { Outlet, Link, useLocation } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
-import { LayoutDashboard, Star, DollarSign, Newspaper, LogOut, LogIn, TrendingUp } from 'lucide-react';
+import { Outlet, NavLink } from 'react-router-dom';
+import { LayoutDashboard, Star, DollarSign, Newspaper, TrendingUp, Menu, X, ArrowUpRight } from 'lucide-react';
+import { useState } from 'react';
 
 export default function Layout() {
-  const { user, signInWithGoogle, logout } = useAuth();
-  const location = useLocation();
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const navItems = [
-    { name: 'Dashboard', path: '/', icon: LayoutDashboard },
-    { name: 'Favorites', path: '/favorites', icon: Star },
-    { name: 'Currency', path: '/currency', icon: DollarSign },
-    { name: 'News', path: '/news', icon: Newspaper },
+    { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
+    { icon: Star, label: 'Watchlist', path: '/favorites' },
+    { icon: DollarSign, label: 'Currency', path: '/currency' },
+    { icon: Newspaper, label: 'News', path: '/news' },
   ];
 
   return (
-    <div className="flex h-screen bg-gray-50 text-gray-900">
-      {/* Sidebar */}
-      <aside className="w-64 bg-white border-r border-gray-200 flex flex-col hover:shadow-xl transition-shadow duration-300">
-        <div className="p-6 flex items-center gap-3">
-          <div className="p-2 bg-blue-600 rounded-lg shadow-lg shadow-blue-500/30">
-            <TrendingUp size={24} className="text-white" />
+    <div className="flex bg-[#0b0f19] min-h-screen text-slate-200 font-sans">
+      {/* Sidebar - Desktop */}
+      <aside className="hidden lg:flex flex-col w-64 border-r border-slate-800/60 bg-[#0f172a] shadow-xl z-20 sticky top-0 h-screen">
+        <div className="p-6">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+              <TrendingUp size={24} className="text-[#0f172a]" />
+            </div>
+            <div>
+              <h1 className="text-xl font-black tracking-tight text-white">GVK<span className="text-emerald-400">Insights</span></h1>
+              <p className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Terminal v2.0</p>
+            </div>
           </div>
-          <h1 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent transform hover:scale-105 transition-transform cursor-default">
-            GVK Insights
-          </h1>
         </div>
-        
-        <nav className="flex-1 px-4 space-y-2 mt-4">
-          {navItems.map((item) => {
-            const isActive = location.pathname === item.path;
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.name}
-                to={item.path}
-                className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 ${
+
+        <nav className="flex-1 px-4 py-8 space-y-2">
+          {navItems.map((item) => (
+            <NavLink
+              key={item.path}
+              to={item.path}
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all duration-200 group ${
                   isActive 
-                    ? 'bg-blue-50 text-blue-700 font-semibold shadow-sm' 
-                    : 'text-gray-600 hover:bg-gray-100/80 hover:text-gray-900'
-                }`}
-              >
-                <Icon size={20} className={isActive ? 'text-blue-600' : 'text-gray-500'} />
-                {item.name}
-              </Link>
-            );
-          })}
+                    ? 'bg-slate-800/80 text-emerald-400 shadow-md ring-1 ring-slate-700/50' 
+                    : 'text-slate-400 hover:bg-slate-800/40 hover:text-slate-200'
+                }`
+              }
+            >
+              <item.icon size={20} className="transition-transform group-hover:scale-110" />
+              {item.label}
+            </NavLink>
+          ))}
         </nav>
 
-        <div className="p-4 border-t border-gray-100">
-          {user ? (
-            <div className="space-y-3">
-              <div className="flex items-center gap-3 px-2">
-                <img src={user.photoURL} alt="Avatar" className="w-10 h-10 rounded-full border-2 border-indigo-100 shadow-sm" />
-                <div className="overflow-hidden">
-                  <p className="text-sm font-semibold text-gray-800 truncate">{user.displayName}</p>
-                  <p className="text-xs text-gray-500 truncate">{user.email}</p>
-                </div>
+        <div className="p-6 border-t border-slate-800/60 mb-4">
+           <div className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50 flex items-center justify-between">
+              <div>
+                 <p className="text-xs text-slate-400 font-medium uppercase tracking-wider">Status</p>
+                 <p className="text-sm font-bold text-emerald-400 flex items-center gap-1.5 mt-0.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> Data Live
+                 </p>
               </div>
-              <button
-                onClick={logout}
-                className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-medium text-red-600 hover:bg-red-50 hover:text-red-700 transition-colors border border-transparent hover:border-red-100"
-              >
-                <LogOut size={16} /> Logout
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={signInWithGoogle}
-              className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-gray-900 hover:bg-gray-800 text-white text-sm font-medium shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-0.5 active:translate-y-0"
-            >
-              <LogIn size={18} /> Sign In with Google
-            </button>
-          )}
+           </div>
         </div>
       </aside>
 
-      {/* Main Content */}
-      <main className="flex-1 overflow-auto">
-        <header className="bg-white/80 backdrop-blur-md sticky top-0 z-10 border-b border-gray-200/60 shadow-sm px-8 py-4 flex justify-between items-center transition-all duration-300">
-           <h2 className="text-2xl font-bold tracking-tight text-gray-800">
-             {navItems.find(i => i.path === location.pathname)?.name || 'Dashboard'}
-           </h2>
-           <div className="flex items-center gap-4">
-             {user && (
-               <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 animate-pulse">
-                 Live Feed Active
-               </span>
-             )}
+      {/* Mobile Header & Menu */}
+      <div className="lg:hidden fixed top-0 left-0 right-0 h-16 bg-[#0f172a] border-b border-slate-800/60 z-30 flex items-center justify-between px-4">
+        <div className="flex items-center gap-2">
+           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center">
+             <TrendingUp size={18} className="text-[#0f172a]" />
            </div>
-        </header>
-        <div className="p-8 max-w-7xl mx-auto">
+           <h1 className="text-lg font-black text-white tracking-tight">GVK<span className="text-emerald-400">Insights</span></h1>
+        </div>
+        <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-2 text-slate-300">
+          {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+        </button>
+      </div>
+
+      {isMobileMenuOpen && (
+        <div className="lg:hidden fixed inset-0 z-20 bg-[#0b0f19]/95 backdrop-blur-sm pt-20 px-4">
+          <nav className="space-y-3">
+            {navItems.map((item) => (
+              <NavLink
+                key={item.path}
+                to={item.path}
+                onClick={() => setIsMobileMenuOpen(false)}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 px-4 p-4 rounded-xl font-bold text-lg ${
+                    isActive ? 'bg-slate-800 text-emerald-400' : 'text-slate-300 hover:bg-slate-800/50'
+                  }`
+                }
+              >
+                <item.icon size={24} />
+                {item.label}
+              </NavLink>
+            ))}
+          </nav>
+        </div>
+      )}
+
+      {/* Main Content Area */}
+      <main className="flex-1 min-w-0 lg:ml-0 mt-16 lg:mt-0 relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-emerald-500/5 blur-[120px] rounded-full pointer-events-none -z-10"></div>
+        <div className="h-[calc(100vh-4rem)] lg:h-screen overflow-y-auto custom-scrollbar p-4 sm:p-8 lg:p-10">
           <Outlet />
         </div>
       </main>
