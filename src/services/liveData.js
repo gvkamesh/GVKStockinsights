@@ -1,102 +1,278 @@
-// Live data fetching using FREE public APIs (no API keys required)
-//
-// Stocks:  Yahoo Finance public quote endpoint
-// Currency: Frankfurter.app (European Central Bank rates, free & open-source)
+// ══════════════════════════════════════════════════════════════════════
+//  Multi-Source Live Data Pipeline
+//  Priority: TradingView → Yahoo Finance → Google Finance
+//  Currency: Frankfurter.app (European Central Bank, always accurate)
+// ══════════════════════════════════════════════════════════════════════
 
-const YAHOO_QUOTE_URL = 'https://query1.finance.yahoo.com/v8/finance/chart/';
+const TRADINGVIEW_URL = 'https://scanner.tradingview.com/america/scan';
+const YAHOO_CHART_URL = 'https://query1.finance.yahoo.com/v8/finance/chart/';
 const CORS_PROXY = 'https://api.allorigins.win/get?url=';
 const CURRENCY_API = 'https://api.frankfurter.app/latest';
 
-/**
- * Fetch live stock price from Yahoo Finance (via CORS proxy)
- */
-export async function fetchLivePrice(symbol, range = '5d') {
+// Exchange lookup for TradingView symbol format
+const EXCHANGE_MAP = {
+  // ETFs
+  SPY: 'AMEX', QQQ: 'NASDAQ', TQQQ: 'NASDAQ', VOO: 'AMEX', VTI: 'AMEX', VGT: 'AMEX',
+  GLD: 'AMEX', SLV: 'AMEX',
+  // Tech
+  AAPL: 'NASDAQ', MSFT: 'NASDAQ', NVDA: 'NASDAQ', TSLA: 'NASDAQ', AMZN: 'NASDAQ',
+  META: 'NASDAQ', NFLX: 'NASDAQ', PLTR: 'NASDAQ', CRWD: 'NASDAQ', UBER: 'NYSE',
+  // Broad
+  JPM: 'NYSE', UNH: 'NYSE', CVX: 'NYSE', NKE: 'NYSE', DAL: 'NYSE', M: 'NYSE',
+};
+
+// ─── Source 1: TradingView Scanner API (no CORS, no key) ──────────
+async function fetchFromTradingView(symbols) {
+  try {
+    const tickers = symbols.map(sym => {
+      if (sym === 'BTC-USD') return 'CRYPTO:BTCUSD';
+      const exchange = EXCHANGE_MAP[sym] || 'NASDAQ';
+      return `${exchange}:${sym}`;
+    });
+
+    const res = await fetch(TRADINGVIEW_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        symbols: { tickers, query: { types: [] } },
+        columns: ['close', 'change', 'change_abs', 'name', 'description', 'high', 'low', 'open', 'volume'],
+      }),
+      signal: AbortSignal.timeout(12000),
+    });
+
+    if (!res.ok) throw new Error(`TradingView HTTP ${res.status}`);
+    const json = await res.json();
+
+    const results = {};
+    for (const item of json.data || []) {
+      const rawSymbol = item.s; // e.g. "NASDAQ:AAPL"
+      const [, ticker] = rawSymbol.split(':');
+      const [close, changePct, changeAbs, name, description, high, low, open, volume] = item.d;
+      
+      // Map back to our symbol format
+      const ourSymbol = ticker === 'BTCUSD' ? 'BTC-USD' : ticker;
+      results[ourSymbol] = {
+        price: close,
+        change: changePct,
+        changeAbs,
+        high,
+        low,
+        open,
+        volume,
+        source: 'TradingView',
+      };
+    }
+    return results;
+  } catch (err) {
+    console.warn('TradingView source failed:', err.message);
+    return null;
+  }
+}
+
+// ─── Source 2: Yahoo Finance (via CORS proxy) ─────────────────────
+async function fetchFromYahoo(symbol, range = '5d') {
   try {
     const url = `${CORS_PROXY}${encodeURIComponent(
-      `${YAHOO_QUOTE_URL}${symbol}?interval=1d&range=${range}`
+      `${YAHOO_CHART_URL}${symbol}?interval=1d&range=${range}`
     )}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw new Error(`Yahoo HTTP ${res.status}`);
 
     const wrapper = await res.json();
-    if (!wrapper.contents) return null;
+    if (!wrapper.contents) throw new Error('No contents in proxy response');
     const json = JSON.parse(wrapper.contents);
-    
+
     const result = json?.chart?.result?.[0];
-    if (!result) return null;
+    if (!result) throw new Error('No chart result');
 
     const meta = result.meta;
     const price = meta.regularMarketPrice;
     const prevClose = meta.chartPreviousClose || meta.previousClose;
     const change = prevClose ? ((price - prevClose) / prevClose) * 100 : 0;
-
-    // Get last 5 closes for sparkline
     const closes = result.indicators?.quote?.[0]?.close?.filter(Boolean) || [];
 
-    return { price, change, history: closes };
+    return { price, change, history: closes, source: 'Yahoo Finance' };
   } catch (err) {
-    console.warn(`Yahoo fetch failed for ${symbol}:`, err.message);
+    console.warn(`Yahoo source failed for ${symbol}:`, err.message);
     return null;
   }
 }
 
-/**
- * Batch fetch stock prices for an array of stock objects
- * Processes in small parallel batches to avoid overload
- */
-export async function fetchBatchPrices(stocks) {
-  const BATCH_SIZE = 6;
-  const enriched = [];
+// ─── Source 3: Google Finance Scraping (via CORS proxy) ───────────
+async function fetchFromGoogle(symbol) {
+  try {
+    const googleSymbol = symbol === 'BTC-USD' ? 'BTC-USD' : symbol;
+    const exchanges = ['NASDAQ', 'NYSE', 'NYSEARCA'];
+    
+    for (const exchange of exchanges) {
+      try {
+        const url = `${CORS_PROXY}${encodeURIComponent(
+          `https://www.google.com/finance/quote/${googleSymbol}:${exchange}`
+        )}`;
+        const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+        if (!res.ok) continue;
 
-  for (let i = 0; i < stocks.length; i += BATCH_SIZE) {
-    const batch = stocks.slice(i, i + BATCH_SIZE);
-    const results = await Promise.allSettled(
-      batch.map(async (stock) => {
-        const liveData = await fetchLivePrice(stock.symbol);
-        if (liveData) {
+        const wrapper = await res.json();
+        const html = wrapper?.contents || '';
+        if (!html || html.length < 1000) continue;
+
+        // Parse price from Google Finance HTML
+        const priceMatch = html.match(/data-last-price="([^"]+)"/);
+        const changeMatch = html.match(/data-last-normal-market-change-percent="([^"]+)"/);
+
+        if (priceMatch) {
           return {
-            ...stock,
-            price: liveData.price,
-            change: liveData.change,
-            history: liveData.history,
-            isLive: true,
+            price: parseFloat(priceMatch[1]),
+            change: changeMatch ? parseFloat(changeMatch[1]) : 0,
+            source: 'Google Finance',
           };
         }
-        return { ...stock, price: null, change: null, history: [], isLive: false };
-      })
-    );
-
-    for (const r of results) {
-      enriched.push(r.status === 'fulfilled' ? r.value : { ...stocks[enriched.length], price: null, change: null, history: [], isLive: false });
+      } catch {
+        continue;
+      }
     }
+    return null;
+  } catch (err) {
+    console.warn(`Google source failed for ${symbol}:`, err.message);
+    return null;
   }
+}
 
-  return enriched;
+// ═══════════════════════════════════════════════════════════════════
+//  PUBLIC API: Batch fetch with cascading fallback
+// ═══════════════════════════════════════════════════════════════════
+
+let _activeSource = 'Connecting...';
+
+export function getActiveSource() {
+  return _activeSource;
 }
 
 /**
- * Fetch ALL currency rates from Frankfurter.app in a single call
- * This API uses European Central Bank data — highly accurate, updated daily
+ * Fetch a single stock with optional range (for modal deep-dive)
  */
+export async function fetchLivePrice(symbol, range = '5d') {
+  // Try TradingView first (batch of 1)
+  const tvResults = await fetchFromTradingView([symbol]);
+  if (tvResults && tvResults[symbol]) {
+    _activeSource = 'TradingView';
+    return { ...tvResults[symbol], isLive: true };
+  }
+
+  // Fallback: Yahoo
+  const yahoo = await fetchFromYahoo(symbol, range);
+  if (yahoo) {
+    _activeSource = 'Yahoo Finance';
+    return { ...yahoo, isLive: true };
+  }
+
+  // Fallback: Google
+  const google = await fetchFromGoogle(symbol);
+  if (google) {
+    _activeSource = 'Google Finance';
+    return { ...google, isLive: true };
+  }
+
+  return null;
+}
+
+/**
+ * Batch fetch stock prices for an array of stock objects.
+ * Tries TradingView batch first (most efficient), then falls back per-stock.
+ */
+export async function fetchBatchPrices(stocks) {
+  const symbols = stocks.map(s => s.symbol);
+  
+  // ── Attempt 1: TradingView batch (single request for ALL stocks) ──
+  const tvResults = await fetchFromTradingView(symbols);
+  
+  if (tvResults && Object.keys(tvResults).length > 0) {
+    _activeSource = 'TradingView';
+    const enriched = stocks.map(stock => {
+      const tv = tvResults[stock.symbol];
+      if (tv) {
+        return {
+          ...stock,
+          price: tv.price,
+          change: tv.change,
+          high: tv.high,
+          low: tv.low,
+          open: tv.open,
+          volume: tv.volume,
+          source: 'TradingView',
+          isLive: true,
+        };
+      }
+      return { ...stock, price: null, change: null, source: 'Offline', isLive: false };
+    });
+    return enriched;
+  }
+
+  // ── Attempt 2: Yahoo Finance per-stock (with small batches) ──
+  console.log('TradingView unavailable, falling back to Yahoo Finance...');
+  let anyYahooWorked = false;
+  const BATCH = 4;
+  const enriched = [];
+
+  for (let i = 0; i < stocks.length; i += BATCH) {
+    const batch = stocks.slice(i, i + BATCH);
+    const results = await Promise.allSettled(
+      batch.map(async (stock) => {
+        const data = await fetchFromYahoo(stock.symbol);
+        if (data) {
+          anyYahooWorked = true;
+          return { ...stock, ...data, isLive: true };
+        }
+        return { ...stock, price: null, change: null, source: 'Offline', isLive: false };
+      })
+    );
+    for (const r of results) {
+      enriched.push(r.status === 'fulfilled' ? r.value : { ...stocks[enriched.length], price: null, change: null, source: 'Offline', isLive: false });
+    }
+  }
+
+  if (anyYahooWorked) {
+    _activeSource = 'Yahoo Finance';
+    return enriched;
+  }
+
+  // ── Attempt 3: Google Finance per-stock ──
+  console.log('Yahoo unavailable, falling back to Google Finance...');
+  const googleEnriched = [];
+  for (const stock of stocks) {
+    const data = await fetchFromGoogle(stock.symbol);
+    if (data) {
+      _activeSource = 'Google Finance';
+      googleEnriched.push({ ...stock, ...data, isLive: true });
+    } else {
+      googleEnriched.push({ ...stock, price: null, change: null, source: 'Offline', isLive: false });
+    }
+  }
+  return googleEnriched;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Currency Rates (Frankfurter.app — always works, ECB data)
+// ═══════════════════════════════════════════════════════════════════
+
 export async function fetchAllCurrencyRates(pairs) {
   try {
-    const currencies = pairs.map((p) => p.to).join(',');
+    const currencies = pairs.map(p => p.to).join(',');
     const res = await fetch(`${CURRENCY_API}?from=USD&to=${currencies}`, {
       signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
     const data = await res.json();
-    // data.rates = { EUR: 0.92, GBP: 0.79, ... }
 
-    return pairs.map((pair) => ({
+    return pairs.map(pair => ({
       ...pair,
       rate: data.rates?.[pair.to] ?? null,
       isLive: data.rates?.[pair.to] != null,
-      date: data.date, // the ECB reference date
+      source: 'Frankfurter (ECB)',
+      date: data.date,
     }));
   } catch (err) {
     console.warn('Currency fetch failed:', err.message);
-    return pairs.map((p) => ({ ...p, rate: null, isLive: false }));
+    return pairs.map(p => ({ ...p, rate: null, isLive: false, source: 'Offline' }));
   }
 }

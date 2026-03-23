@@ -1,9 +1,16 @@
 import { Outlet, NavLink } from 'react-router-dom';
-import { LayoutDashboard, Star, DollarSign, Newspaper, TrendingUp, Menu, X, ArrowUpRight } from 'lucide-react';
-import { useState } from 'react';
+import { LayoutDashboard, Star, DollarSign, Newspaper, TrendingUp, Menu, X, Database } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { getActiveSource } from '../services/liveData';
 
 export default function Layout() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [source, setSource] = useState('Connecting...');
+
+  useEffect(() => {
+    const interval = setInterval(() => setSource(getActiveSource()), 2000);
+    return () => clearInterval(interval);
+  }, []);
 
   const navItems = [
     { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
@@ -47,14 +54,21 @@ export default function Layout() {
           ))}
         </nav>
 
-        <div className="p-6 border-t border-slate-800/60 mb-4">
-           <div className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50 flex items-center justify-between">
-              <div>
-                 <p className="text-xs text-slate-400 font-medium uppercase tracking-wider">Status</p>
-                 <p className="text-sm font-bold text-emerald-400 flex items-center gap-1.5 mt-0.5">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> Data Live
-                 </p>
+        <div className="p-6 border-t border-slate-800/60 mb-4 space-y-3">
+           <div className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50">
+              <div className="flex items-center gap-2 mb-2">
+                 <Database size={12} className="text-cyan-400" />
+                 <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Data Source</p>
               </div>
+              <p className="text-sm font-bold text-cyan-400 flex items-center gap-1.5">
+                 <span className={`w-2 h-2 rounded-full ${source === 'Connecting...' ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500 animate-pulse'}`}></span>
+                 {source}
+              </p>
+           </div>
+           <div className="bg-slate-800/40 p-3 rounded-xl border border-slate-700/50">
+              <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest leading-relaxed">
+                 Fallback: TradingView → Yahoo → Google
+              </p>
            </div>
         </div>
       </aside>

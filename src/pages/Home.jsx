@@ -59,7 +59,7 @@ export default function Home() {
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
         <div>
           <h1 className="text-3xl font-extrabold text-white tracking-tight">Market Overview</h1>
-          <p className="text-slate-400 mt-1">Real-time quotes aggregated via Yahoo Finance</p>
+          <p className="text-slate-400 mt-1">Real-time quotes aggregated via intelligent multi-source pipeline</p>
         </div>
         <div className="flex items-center gap-3">
           {lastUpdated && (
