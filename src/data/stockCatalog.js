@@ -85,7 +85,7 @@ export const CURRENCY_PAIRS = [
   { from: 'USD', to: 'AUD', symbol: 'A$', name: 'Australian Dollar' },
   { from: 'USD', to: 'CAD', symbol: 'C$', name: 'Canadian Dollar' },
   { from: 'USD', to: 'CHF', symbol: 'Fr', name: 'Swiss Franc' },
-  { from: 'USD', to: 'CNY', symbol: '¥', name: 'Chinese Yuan' },
+  { from: 'USD', to: 'SGD', symbol: 'S$', name: 'Singapore Dollar' },
 ];
 
 // Expanded news catalog with full story content

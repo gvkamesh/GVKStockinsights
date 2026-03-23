@@ -1,162 +1,102 @@
-// Live data fetching via Google Finance (no API key required)
-// Uses a CORS proxy to scrape Google Finance pages
+// Live data fetching using FREE public APIs (no API keys required)
+//
+// Stocks:  Yahoo Finance public quote endpoint
+// Currency: Frankfurter.app (European Central Bank rates, free & open-source)
 
-const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
+const YAHOO_QUOTE_URL = 'https://query1.finance.yahoo.com/v8/finance/chart/';
+const CORS_PROXY = 'https://api.allorigins.win/get?url=';
+const CURRENCY_API = 'https://api.frankfurter.app/latest';
 
 /**
- * Fetch live stock price from Google Finance
- * Falls back to estimated data if scraping fails
+ * Fetch live stock price from Yahoo Finance (via CORS proxy)
  */
-export async function fetchLivePrice(symbol) {
+export async function fetchLivePrice(symbol, range = '5d') {
   try {
-    const url = `${CORS_PROXY}${encodeURIComponent(`https://www.google.com/finance/quote/${symbol}:NASDAQ`)}`;
-    const response = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    const url = `${CORS_PROXY}${encodeURIComponent(
+      `${YAHOO_QUOTE_URL}${symbol}?interval=1d&range=${range}`
+    )}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-    if (!response.ok) {
-      // Try NYSE
-      const url2 = `${CORS_PROXY}${encodeURIComponent(`https://www.google.com/finance/quote/${symbol}:NYSE`)}`;
-      const response2 = await fetch(url2, { signal: AbortSignal.timeout(8000) });
-      if (!response2.ok) throw new Error('Failed');
-      return parseGoogleFinancePage(await response2.text(), symbol);
-    }
+    const wrapper = await res.json();
+    if (!wrapper.contents) return null;
+    const json = JSON.parse(wrapper.contents);
+    
+    const result = json?.chart?.result?.[0];
+    if (!result) return null;
 
-    return parseGoogleFinancePage(await response.text(), symbol);
+    const meta = result.meta;
+    const price = meta.regularMarketPrice;
+    const prevClose = meta.chartPreviousClose || meta.previousClose;
+    const change = prevClose ? ((price - prevClose) / prevClose) * 100 : 0;
+
+    // Get last 5 closes for sparkline
+    const closes = result.indicators?.quote?.[0]?.close?.filter(Boolean) || [];
+
+    return { price, change, history: closes };
   } catch (err) {
-    // Try NYSEARCA for ETFs
-    try {
-      const url3 = `${CORS_PROXY}${encodeURIComponent(`https://www.google.com/finance/quote/${symbol}:NYSEARCA`)}`;
-      const response3 = await fetch(url3, { signal: AbortSignal.timeout(8000) });
-      if (response3.ok) {
-        return parseGoogleFinancePage(await response3.text(), symbol);
-      }
-    } catch (_) {}
-
-    console.warn(`Could not fetch live price for ${symbol}, using fallback`);
-    return null;
-  }
-}
-
-/**
- * Parse Google Finance HTML to extract price and change
- */
-function parseGoogleFinancePage(html, symbol) {
-  try {
-    // Extract price - Google Finance puts price in a specific data attribute pattern
-    // The price appears in the page in various formats, we'll try multiple patterns
-
-    // Pattern 1: Look for the main price display
-    let priceMatch = html.match(/data-last-price="([^"]+)"/);
-    let price = priceMatch ? parseFloat(priceMatch[1]) : null;
-
-    // Pattern 2: Alternative price pattern
-    if (!price) {
-      priceMatch = html.match(/class="YMlKec fxKbKc"[^>]*>([^<]+)</);
-      if (priceMatch) {
-        price = parseFloat(priceMatch[1].replace(/[$,]/g, ''));
-      }
-    }
-
-    // Pattern 3: Try data-value
-    if (!price) {
-      priceMatch = html.match(/data-value="([^"]+)"/);
-      if (priceMatch) {
-        price = parseFloat(priceMatch[1]);
-      }
-    }
-
-    // Extract change percentage
-    let changeMatch = html.match(/data-last-normal-market-change-percent="([^"]+)"/);
-    let change = changeMatch ? parseFloat(changeMatch[1]) : null;
-
-    // Alternative change pattern
-    if (change === null) {
-      changeMatch = html.match(/class="[^"]*P2Luy[^"]*"[^>]*>([^<]+)%/);
-      if (changeMatch) {
-        change = parseFloat(changeMatch[1]);
-      }
-    }
-
-    // If we still don't have change, try to find it
-    if (change === null) {
-      changeMatch = html.match(/([-+]?\d+\.?\d*)%/);
-      if (changeMatch) {
-        change = parseFloat(changeMatch[1]);
-      }
-    }
-
-    if (price) {
-      return { price, change: change || 0 };
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Fetch live currency exchange rate from Google Finance
- */
-export async function fetchLiveCurrencyRate(from, to) {
-  try {
-    const url = `${CORS_PROXY}${encodeURIComponent(`https://www.google.com/finance/quote/${from}-${to}`)}`;
-    const response = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    if (!response.ok) throw new Error('Failed');
-
-    const html = await response.text();
-
-    // Extract the exchange rate
-    let rateMatch = html.match(/data-last-price="([^"]+)"/);
-    if (rateMatch) {
-      return parseFloat(rateMatch[1]);
-    }
-
-    // Alternative pattern
-    rateMatch = html.match(/class="YMlKec fxKbKc"[^>]*>([^<]+)</);
-    if (rateMatch) {
-      return parseFloat(rateMatch[1].replace(/[,]/g, ''));
-    }
-
-    return null;
-  } catch {
-    console.warn(`Could not fetch live rate for ${from}-${to}`);
+    console.warn(`Yahoo fetch failed for ${symbol}:`, err.message);
     return null;
   }
 }
 
 /**
  * Batch fetch stock prices for an array of stock objects
- * Returns enriched stock objects with live price data
+ * Processes in small parallel batches to avoid overload
  */
 export async function fetchBatchPrices(stocks) {
-  const results = await Promise.allSettled(
-    stocks.map(async (stock) => {
-      const liveData = await fetchLivePrice(stock.symbol);
-      if (liveData) {
-        return { ...stock, price: liveData.price, change: liveData.change, isLive: true };
-      }
-      return { ...stock, price: null, change: null, isLive: false };
-    })
-  );
+  const BATCH_SIZE = 6;
+  const enriched = [];
 
-  return results.map((result, i) => {
-    if (result.status === 'fulfilled') return result.value;
-    return { ...stocks[i], price: null, change: null, isLive: false };
-  });
+  for (let i = 0; i < stocks.length; i += BATCH_SIZE) {
+    const batch = stocks.slice(i, i + BATCH_SIZE);
+    const results = await Promise.allSettled(
+      batch.map(async (stock) => {
+        const liveData = await fetchLivePrice(stock.symbol);
+        if (liveData) {
+          return {
+            ...stock,
+            price: liveData.price,
+            change: liveData.change,
+            history: liveData.history,
+            isLive: true,
+          };
+        }
+        return { ...stock, price: null, change: null, history: [], isLive: false };
+      })
+    );
+
+    for (const r of results) {
+      enriched.push(r.status === 'fulfilled' ? r.value : { ...stocks[enriched.length], price: null, change: null, history: [], isLive: false });
+    }
+  }
+
+  return enriched;
 }
 
 /**
- * Batch fetch currency rates
+ * Fetch ALL currency rates from Frankfurter.app in a single call
+ * This API uses European Central Bank data — highly accurate, updated daily
  */
 export async function fetchAllCurrencyRates(pairs) {
-  const results = await Promise.allSettled(
-    pairs.map(async (pair) => {
-      const rate = await fetchLiveCurrencyRate(pair.from, pair.to);
-      return { ...pair, rate, isLive: rate !== null };
-    })
-  );
+  try {
+    const currencies = pairs.map((p) => p.to).join(',');
+    const res = await fetch(`${CURRENCY_API}?from=USD&to=${currencies}`, {
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-  return results.map((result, i) => {
-    if (result.status === 'fulfilled') return result.value;
-    return { ...pairs[i], rate: null, isLive: false };
-  });
+    const data = await res.json();
+    // data.rates = { EUR: 0.92, GBP: 0.79, ... }
+
+    return pairs.map((pair) => ({
+      ...pair,
+      rate: data.rates?.[pair.to] ?? null,
+      isLive: data.rates?.[pair.to] != null,
+      date: data.date, // the ECB reference date
+    }));
+  } catch (err) {
+    console.warn('Currency fetch failed:', err.message);
+    return pairs.map((p) => ({ ...p, rate: null, isLive: false }));
+  }
 }

@@ -5,10 +5,12 @@ import { useStore } from '../store/useStore';
 import { useAuth } from '../context/AuthContext';
 import { TrendingUp, TrendingDown, BrainCircuit, Star, RefreshCw, Loader2 } from 'lucide-react';
 import { LineChart, Line, ResponsiveContainer, YAxis, Tooltip, XAxis } from 'recharts';
+import StockModal from '../components/StockModal';
 
 export default function Favorites() {
   const [stocks, setStocks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [selectedStock, setSelectedStock] = useState(null);
   const { favorites } = useStore();
   const { user } = useAuth();
 
@@ -109,7 +111,11 @@ export default function Favorites() {
           const prediction = getAIPrediction(stock);
 
           return (
-            <div key={stock.symbol} className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm hover:shadow-xl transition-all duration-300">
+            <div 
+               key={stock.symbol} 
+               onClick={() => setSelectedStock(stock)}
+               className="cursor-pointer bg-white rounded-2xl p-6 border border-gray-200 shadow-sm hover:shadow-xl transition-all duration-300"
+            >
               {/* Header */}
               <div className="flex justify-between items-start mb-4">
                 <div>
@@ -181,6 +187,7 @@ export default function Favorites() {
           );
         })}
       </div>
+      {selectedStock && <StockModal stock={selectedStock} onClose={() => setSelectedStock(null)} />}
     </div>
   );
 }

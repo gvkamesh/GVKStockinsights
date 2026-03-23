@@ -4,6 +4,7 @@ import { fetchBatchPrices } from '../services/liveData';
 import { useStore } from '../store/useStore';
 import { useAuth } from '../context/AuthContext';
 import { Star, TrendingUp, TrendingDown, RefreshCw, Loader2, Wifi, WifiOff } from 'lucide-react';
+import StockModal from '../components/StockModal';
 
 export default function Home() {
   const [stockData, setStockData] = useState({});
@@ -11,6 +12,7 @@ export default function Home() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [activeSector, setActiveSector] = useState(null);
+  const [selectedStock, setSelectedStock] = useState(null);
   const { user } = useAuth();
   const { favorites, addFavorite, removeFavorite, loadFavorites } = useStore();
 
@@ -125,7 +127,8 @@ export default function Home() {
                 return (
                   <div
                     key={stock.symbol}
-                    className="p-4 rounded-xl border border-gray-100 hover:border-blue-200 hover:shadow-lg transition-all duration-300 group bg-gradient-to-br from-white to-gray-50/50 relative overflow-hidden"
+                    onClick={() => setSelectedStock(stock)}
+                    className="cursor-pointer p-4 rounded-xl border border-gray-100 hover:border-blue-200 hover:shadow-lg transition-all duration-300 group bg-gradient-to-br from-white to-gray-50/50 relative overflow-hidden"
                   >
                     {/* Live indicator */}
                     <div className="absolute top-3 right-3 flex items-center gap-1">
@@ -140,7 +143,7 @@ export default function Home() {
                       <div>
                         <div className="flex items-center gap-2">
                           <h3 className="font-bold text-gray-900 text-lg tracking-tight">{stock.symbol}</h3>
-                          <button onClick={() => toggleFavorite(stock.symbol)} className="opacity-0 group-hover:opacity-100 transition-opacity p-1">
+                          <button onClick={(e) => { e.stopPropagation(); toggleFavorite(stock.symbol); }} className="opacity-0 group-hover:opacity-100 transition-opacity p-1">
                             <Star size={16} className={isFav ? "fill-yellow-400 text-yellow-400" : "text-gray-300"} />
                           </button>
                         </div>
@@ -170,6 +173,7 @@ export default function Home() {
           </div>
         </div>
       ))}
+      {selectedStock && <StockModal stock={selectedStock} onClose={() => setSelectedStock(null)} />}
     </div>
   );
 }
