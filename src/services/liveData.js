@@ -8,6 +8,7 @@ const TRADINGVIEW_URL = 'https://scanner.tradingview.com/america/scan';
 const YAHOO_CHART_URL = 'https://query1.finance.yahoo.com/v8/finance/chart/';
 const CORS_PROXY = 'https://api.allorigins.win/get?url=';
 const CURRENCY_API = 'https://api.frankfurter.app/latest';
+const TIINGO_IEX_API = 'https://api.tiingo.com/iex/';
 
 // Exchange lookup for TradingView symbol format
 const EXCHANGE_MAP = {
@@ -21,7 +22,58 @@ const EXCHANGE_MAP = {
   JPM: 'NYSE', UNH: 'NYSE', CVX: 'NYSE', NKE: 'NYSE', DAL: 'NYSE', M: 'NYSE',
 };
 
-// ─── Source 1: TradingView Scanner API (no CORS, no key) ──────────
+// ─── Source 1: Tiingo Real-Time IEX (Requires API Key) ──────────────
+async function fetchFromTiingo(symbols) {
+  try {
+    // Read the key directly from local storage since it's a frontend app
+    const storageObj = JSON.parse(localStorage.getItem('gvk-stock-storage') || '{}');
+    const token = storageObj?.state?.tiingoKey;
+    if (!token) return null; // No key configured, silently fallback
+
+    // Tiingo can't do BTC-USD through IEX
+    const cleanSymbols = symbols.filter(s => s !== 'BTC-USD');
+    if (cleanSymbols.length === 0) return null;
+
+    const res = await fetch(`${TIINGO_IEX_API}?tickers=${cleanSymbols.join(',')}&token=${token}`, {
+      signal: AbortSignal.timeout(8000),
+    });
+
+    if (!res.ok) {
+       if (res.status === 401) console.warn('Tiingo Key Invalid');
+       throw new Error(`Tiingo HTTP ${res.status}`);
+    }
+    
+    const json = await res.json();
+    const results = {};
+    
+    for (const item of json) {
+      const sym = item.ticker;
+      const last = item.last || item.tngoLast || item.prevClose; // Fallbacks if market closed
+      
+      // Calculate % change since yesterday's close
+      let changePct = 0;
+      if (item.prevClose && last) {
+         changePct = ((last - item.prevClose) / item.prevClose) * 100;
+      }
+
+      results[sym] = {
+        price: last,
+        change: changePct,
+        high: item.high,
+        low: item.low,
+        open: item.open,
+        volume: item.volume,
+        source: 'Tiingo IEX',
+      };
+    }
+    return results;
+  } catch (err) {
+    console.warn('Tiingo source failed:', err.message);
+    return null;
+  }
+}
+
+// ─── Source 2: TradingView Scanner API (no CORS, no key) ──────────
 async function fetchFromTradingView(symbols) {
   try {
     const tickers = symbols.map(sym => {
@@ -152,7 +204,15 @@ export function getActiveSource() {
  * Fetch a single stock with optional range (for modal deep-dive)
  */
 export async function fetchLivePrice(symbol, range = '5d') {
-  // Try TradingView first (batch of 1)
+  // Try Tiingo First
+  const tiingo = await fetchFromTiingo([symbol]);
+  if (tiingo && tiingo[symbol]) {
+    _activeSource = 'Tiingo IEX Server';
+    // If we need historical charts for Tiingo later we can add their daily endpoint
+    return { ...tiingo[symbol], isLive: true };
+  }
+
+  // Fallback: TradingView
   const tvResults = await fetchFromTradingView([symbol]);
   if (tvResults && tvResults[symbol]) {
     _activeSource = 'TradingView';
@@ -182,8 +242,42 @@ export async function fetchLivePrice(symbol, range = '5d') {
  */
 export async function fetchBatchPrices(stocks) {
   const symbols = stocks.map(s => s.symbol);
+
+  // ── Attempt 1: Tiingo IEX (Premium Real-Time) ──
+  const tiingoResults = await fetchFromTiingo(symbols);
+  if (tiingoResults && Object.keys(tiingoResults).length > 0) {
+    _activeSource = 'Tiingo IEX Server';
+    const enriched = stocks.map(stock => {
+      const t = tiingoResults[stock.symbol];
+      if (t) {
+        return {
+          ...stock,
+          price: t.price,
+          change: t.change,
+          high: t.high,
+          low: t.low,
+          open: t.open,
+          volume: t.volume,
+          source: 'Tiingo IEX Server',
+          isLive: true,
+        };
+      }
+      return { ...stock, price: null, change: null, source: 'Offline', isLive: false };
+    });
+    // For BTC-USD, Tiingo IEX doesn't handle crypto, so we will quickly patch it via TV
+    if (symbols.includes('BTC-USD') && !tiingoResults['BTC-USD']) {
+       const tvResults = await fetchFromTradingView(['BTC-USD']);
+       if (tvResults && tvResults['BTC-USD']) {
+          const btcIdx = enriched.findIndex(s => s.symbol === 'BTC-USD');
+          if (btcIdx !== -1) {
+             enriched[btcIdx] = { ...enriched[btcIdx], ...tvResults['BTC-USD'], isLive: true, source: 'TradingView' };
+          }
+       }
+    }
+    return enriched;
+  }
   
-  // ── Attempt 1: TradingView batch (single request for ALL stocks) ──
+  // ── Attempt 2: TradingView batch (single request for ALL stocks) ──
   const tvResults = await fetchFromTradingView(symbols);
   
   if (tvResults && Object.keys(tvResults).length > 0) {

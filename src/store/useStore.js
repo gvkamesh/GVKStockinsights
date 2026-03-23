@@ -4,7 +4,18 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 export const useStore = create(
   persist(
     (set) => ({
-      favorites: [],
+      tiingoKey: null,
+    setTiingoKey: (key) => set({ tiingoKey: key }),
+    
+    portfolio: [],
+    addTransaction: (transaction) => set((state) => ({
+      portfolio: [...state.portfolio, { ...transaction, id: crypto.randomUUID(), timestamp: Date.now() }]
+    })),
+    removeTransaction: (id) => set((state) => ({
+      portfolio: state.portfolio.filter(t => t.id !== id)
+    })),
+
+    favorites: [],
 
       addFavorite: (symbol) => 
         set((state) => {

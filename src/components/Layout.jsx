@@ -1,5 +1,5 @@
 import { Outlet, NavLink } from 'react-router-dom';
-import { LayoutDashboard, Star, DollarSign, Newspaper, TrendingUp, Menu, X, Database } from 'lucide-react';
+import { LayoutDashboard, Star, DollarSign, Newspaper, TrendingUp, Menu, X, Database, PieChart } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { getActiveSource } from '../services/liveData';
 
@@ -14,6 +14,7 @@ export default function Layout() {
 
   const navItems = [
     { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
+    { icon: PieChart, label: 'Portfolio', path: '/portfolio' },
     { icon: Star, label: 'Watchlist', path: '/favorites' },
     { icon: DollarSign, label: 'Currency', path: '/currency' },
     { icon: Newspaper, label: 'News', path: '/news' },
